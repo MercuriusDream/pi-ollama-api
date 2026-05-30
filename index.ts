@@ -308,6 +308,27 @@ function makeHeaders(apiKey?: string): Record<string, string> {
   return headers;
 }
 
+// ─── Provider Registration Helper ───────────────────────────────────────
+function registerProviderWithKey(pi: ExtensionAPI, baseUrl: string, apiKey: string | undefined, models: ModelMeta[]) {
+  const keyValue = apiKey && apiKey.trim() ? apiKey.trim() : "$OLLAMA_API_KEY";
+  pi.registerProvider("ollama-cloud", {
+    name: "Ollama Cloud",
+    baseUrl,
+    apiKey: keyValue,
+    api: "openai-completions",
+    authHeader: true,
+    models: models.map((m) => ({
+      id: m.id,
+      name: m.name,
+      reasoning: m.reasoning,
+      input: m.input,
+      cost: m.cost,
+      contextWindow: m.contextWindow,
+      maxTokens: m.maxTokens,
+    })),
+  });
+}
+
 // =============================================================================
 // Dynamic Model Discovery
 // =============================================================================
@@ -382,24 +403,9 @@ export default async function (pi: ExtensionAPI) {
   }
 
   // ─── Register Provider ──────────────────────────────────────────────────
-  pi.registerProvider("ollama-cloud", {
-    name: "Ollama Cloud",
-    baseUrl,
-    apiKey: "$OLLAMA_API_KEY",
-    api: "openai-completions",
-    authHeader: true,
-    models: models.map((m) => ({
-      id: m.id,
-      name: m.name,
-      reasoning: m.reasoning,
-      input: m.input,
-      cost: m.cost,
-      contextWindow: m.contextWindow,
-      maxTokens: m.maxTokens,
-    })),
-  });
+  registerProviderWithKey(pi, baseUrl, apiKey, models);
 
-  // ─── Startup Notification ─────────────────────────────────────────────
+  // ─── Startup Notification + API Key Prompt ──────────────────────────────
   pi.on("session_start", async (_event, ctx) => {
     if (discoveryError) {
       ctx.ui.notify(
@@ -410,6 +416,14 @@ export default async function (pi: ExtensionAPI) {
       ctx.ui.notify(
         `Ollama Cloud: ${models.length} model(s) available. Use /model to select.`,
         "info",
+      );
+    }
+
+    // Prompt for API key if not set
+    if (!apiKey) {
+      ctx.ui.notify(
+        "Ollama Cloud: API key not set. Run /ollama-cloud-login or set OLLAMA_API_KEY.",
+        "warning",
       );
     }
   });
@@ -423,22 +437,7 @@ export default async function (pi: ExtensionAPI) {
       ctx.ui.notify("Refreshing Ollama Cloud models...", "info");
       try {
         const fresh = await fetchOllamaModels(baseUrl, apiKey);
-        pi.registerProvider("ollama-cloud", {
-          name: "Ollama Cloud",
-          baseUrl,
-          apiKey: "$OLLAMA_API_KEY",
-          api: "openai-completions",
-          authHeader: true,
-          models: fresh.map((m) => ({
-            id: m.id,
-            name: m.name,
-            reasoning: m.reasoning,
-            input: m.input,
-            cost: m.cost,
-            contextWindow: m.contextWindow,
-            maxTokens: m.maxTokens,
-          })),
-        });
+        registerProviderWithKey(pi, baseUrl, apiKey, fresh);
         ctx.ui.notify(`Ollama Cloud: refreshed ${fresh.length} models.`, "info");
       } catch (error) {
         ctx.ui.notify(
@@ -453,11 +452,37 @@ export default async function (pi: ExtensionAPI) {
   pi.registerCommand("ollama-cloud-status", {
     description: "Show Ollama Cloud provider status",
     handler: async (_args, ctx) => {
-      const keyPresent = !!apiKey;
+      const keySource = apiKey ? "env (OLLAMA_API_KEY)" : "NOT SET — run /ollama-cloud-login";
       ctx.ui.notify(
-        `Ollama Cloud — baseUrl: ${baseUrl}, API key: ${keyPresent ? "set" : "NOT SET"}, models: ${models.length}`,
-        keyPresent ? "info" : "warning",
+        `Ollama Cloud — baseUrl: ${baseUrl}, API key: ${keySource}, models: ${models.length}`,
+        apiKey ? "info" : "warning",
       );
+    },
+  });
+
+  // /ollama-cloud-login
+  pi.registerCommand("ollama-cloud-login", {
+    description: "Set Ollama Cloud API key via interactive prompt",
+    handler: async (_args, ctx) => {
+      const key = await ctx.ui.input("Ollama Cloud API Key", "Paste your API key from ollama.com/settings:");
+      if (!key || !key.trim()) {
+        ctx.ui.notify("No API key entered. Provider unchanged.", "warning");
+        return;
+      }
+      const trimmed = key.trim();
+      ctx.ui.notify("Updating provider with new API key...", "info");
+      try {
+        const fresh = await fetchOllamaModels(baseUrl, trimmed);
+        registerProviderWithKey(pi, baseUrl, trimmed, fresh);
+        ctx.ui.notify(`Ollama Cloud: API key set. ${fresh.length} models loaded.`, "info");
+      } catch (error) {
+        // If discovery fails with the new key, still register with the key so the user can retry
+        registerProviderWithKey(pi, baseUrl, trimmed, models);
+        ctx.ui.notify(
+          `Ollama Cloud: API key saved. Model discovery failed: ${error instanceof Error ? error.message : String(error)}`,
+          "warning",
+        );
+      }
     },
   });
 
