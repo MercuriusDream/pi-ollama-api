@@ -432,7 +432,7 @@ export default async function (pi: ExtensionAPI) {
         ctx.ui.notify("API key saved. Run /model to select an ollama-cloud model.", "info");
       } else {
         ctx.ui.notify(
-          "Ollama Cloud: API key not set. Run /ollama-cloud-login or set OLLAMA_API_KEY.",
+          "Ollama Cloud: API key not set. Set OLLAMA_API_KEY or use /login → API key.",
           "warning",
         );
       }
@@ -466,25 +466,11 @@ export default async function (pi: ExtensionAPI) {
       const storedKey = await authStorage.getApiKey("ollama-cloud");
       const keySource = storedKey
         ? "stored in auth.json"
-        : "NOT SET — run /ollama-cloud-login or set OLLAMA_API_KEY";
+        : "NOT SET — set OLLAMA_API_KEY or use /login → API key";
       ctx.ui.notify(
         `Ollama Cloud — baseUrl: ${baseUrl}, API key: ${keySource}, models: ${models.length}`,
         storedKey ? "info" : "warning",
       );
-    },
-  });
-
-  // /ollama-cloud-login
-  pi.registerCommand("ollama-cloud-login", {
-    description: "Set Ollama Cloud API key via interactive prompt (stored in Pi auth.json)",
-    handler: async (_args, ctx) => {
-      const key = await ctx.ui.input("Ollama Cloud API Key", "Paste your API key from ollama.com/settings:");
-      if (!key || !key.trim()) {
-        ctx.ui.notify("No API key entered.", "warning");
-        return;
-      }
-      authStorage.set("ollama-cloud", { type: "api_key", key: key.trim() });
-      ctx.ui.notify("API key saved to Pi auth.json. Run /model to select an ollama-cloud model.", "info");
     },
   });
 

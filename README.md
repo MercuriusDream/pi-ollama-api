@@ -51,7 +51,7 @@ pi install npm:pi-ollama-api -l
 
 | Method | How | Where stored |
 |--------|-----|-------------|
-| **Interactive (recommended)** | Run `/ollama-cloud-login` in Pi | `~/.pi/agent/auth.json` |
+| **Pi /login (recommended)** | Run `/login` in Pi → select "Use an API key" | `~/.pi/agent/auth.json` |
 | **Environment variable** | `export OLLAMA_API_KEY=...` | Shell env |
 
 Pi's `AuthStorage` is used natively — API keys are checked in `auth.json` first, then the env var is used as a fallback.
