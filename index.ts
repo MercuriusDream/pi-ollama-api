@@ -25,6 +25,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { AuthStorage } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 // =============================================================================
@@ -309,12 +310,11 @@ function makeHeaders(apiKey?: string): Record<string, string> {
 }
 
 // ─── Provider Registration Helper ───────────────────────────────────────
-function registerProviderWithKey(pi: ExtensionAPI, baseUrl: string, apiKey: string | undefined, models: ModelMeta[]) {
-  const keyValue = apiKey && apiKey.trim() ? apiKey.trim() : "$OLLAMA_API_KEY";
+function registerProviderWithKey(pi: ExtensionAPI, baseUrl: string, models: ModelMeta[]) {
   pi.registerProvider("ollama-cloud", {
     name: "Ollama Cloud",
     baseUrl,
-    apiKey: keyValue,
+    apiKey: "$OLLAMA_API_KEY",
     api: "openai-completions",
     authHeader: true,
     models: models.map((m) => ({
@@ -355,8 +355,9 @@ async function fetchOllamaModels(baseUrl: string, apiKey?: string): Promise<Mode
 // =============================================================================
 
 export default async function (pi: ExtensionAPI) {
+  const authStorage = AuthStorage.create();
   const baseUrl = process.env.OLLAMA_CLOUD_BASE_URL || "https://ollama.com/v1";
-  const apiKey = process.env.OLLAMA_API_KEY;
+  const apiKey = await authStorage.getApiKey("ollama-cloud") ?? process.env.OLLAMA_API_KEY;
   const envModels = process.env.OLLAMA_CLOUD_MODELS;
   const timeout = parseInt(process.env.OLLAMA_CLOUD_TIMEOUT || "30000", 10);
 
@@ -403,7 +404,7 @@ export default async function (pi: ExtensionAPI) {
   }
 
   // ─── Register Provider ──────────────────────────────────────────────────
-  registerProviderWithKey(pi, baseUrl, apiKey, models);
+  registerProviderWithKey(pi, baseUrl, models);
 
   // ─── Startup Notification + API Key Prompt ──────────────────────────────
   pi.on("session_start", async (_event, ctx) => {
@@ -419,12 +420,22 @@ export default async function (pi: ExtensionAPI) {
       );
     }
 
-    // Prompt for API key if not set
-    if (!apiKey) {
-      ctx.ui.notify(
-        "Ollama Cloud: API key not set. Run /ollama-cloud-login or set OLLAMA_API_KEY.",
-        "warning",
+    // Prompt for API key if not set (checks auth.json first, then env var)
+    const storedKey = await authStorage.getApiKey("ollama-cloud");
+    if (!storedKey) {
+      const key = await ctx.ui.input(
+        "Ollama Cloud API Key",
+        "Paste your API key from ollama.com/settings:",
       );
+      if (key?.trim()) {
+        authStorage.set("ollama-cloud", { type: "api_key", key: key.trim() });
+        ctx.ui.notify("API key saved. Run /model to select an ollama-cloud model.", "info");
+      } else {
+        ctx.ui.notify(
+          "Ollama Cloud: API key not set. Run /ollama-cloud-login or set OLLAMA_API_KEY.",
+          "warning",
+        );
+      }
     }
   });
 
@@ -437,7 +448,7 @@ export default async function (pi: ExtensionAPI) {
       ctx.ui.notify("Refreshing Ollama Cloud models...", "info");
       try {
         const fresh = await fetchOllamaModels(baseUrl, apiKey);
-        registerProviderWithKey(pi, baseUrl, apiKey, fresh);
+        registerProviderWithKey(pi, baseUrl, fresh);
         ctx.ui.notify(`Ollama Cloud: refreshed ${fresh.length} models.`, "info");
       } catch (error) {
         ctx.ui.notify(
@@ -452,37 +463,28 @@ export default async function (pi: ExtensionAPI) {
   pi.registerCommand("ollama-cloud-status", {
     description: "Show Ollama Cloud provider status",
     handler: async (_args, ctx) => {
-      const keySource = apiKey ? "env (OLLAMA_API_KEY)" : "NOT SET — run /ollama-cloud-login";
+      const storedKey = await authStorage.getApiKey("ollama-cloud");
+      const keySource = storedKey
+        ? "stored in auth.json"
+        : "NOT SET — run /ollama-cloud-login or set OLLAMA_API_KEY";
       ctx.ui.notify(
         `Ollama Cloud — baseUrl: ${baseUrl}, API key: ${keySource}, models: ${models.length}`,
-        apiKey ? "info" : "warning",
+        storedKey ? "info" : "warning",
       );
     },
   });
 
   // /ollama-cloud-login
   pi.registerCommand("ollama-cloud-login", {
-    description: "Set Ollama Cloud API key via interactive prompt",
+    description: "Set Ollama Cloud API key via interactive prompt (stored in Pi auth.json)",
     handler: async (_args, ctx) => {
       const key = await ctx.ui.input("Ollama Cloud API Key", "Paste your API key from ollama.com/settings:");
       if (!key || !key.trim()) {
-        ctx.ui.notify("No API key entered. Provider unchanged.", "warning");
+        ctx.ui.notify("No API key entered.", "warning");
         return;
       }
-      const trimmed = key.trim();
-      ctx.ui.notify("Updating provider with new API key...", "info");
-      try {
-        const fresh = await fetchOllamaModels(baseUrl, trimmed);
-        registerProviderWithKey(pi, baseUrl, trimmed, fresh);
-        ctx.ui.notify(`Ollama Cloud: API key set. ${fresh.length} models loaded.`, "info");
-      } catch (error) {
-        // If discovery fails with the new key, still register with the key so the user can retry
-        registerProviderWithKey(pi, baseUrl, trimmed, models);
-        ctx.ui.notify(
-          `Ollama Cloud: API key saved. Model discovery failed: ${error instanceof Error ? error.message : String(error)}`,
-          "warning",
-        );
-      }
+      authStorage.set("ollama-cloud", { type: "api_key", key: key.trim() });
+      ctx.ui.notify("API key saved to Pi auth.json. Run /model to select an ollama-cloud model.", "info");
     },
   });
 
@@ -596,13 +598,14 @@ export default async function (pi: ExtensionAPI) {
       ]),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      const toolKey = await authStorage.getApiKey("ollama-cloud") ?? process.env.OLLAMA_API_KEY;
       const body = {
         model: params.model,
         input: Array.isArray(params.input) ? params.input : [params.input],
       };
       const response = await fetch(`${baseUrl}/embeddings`, {
         method: "POST",
-        headers: makeHeaders(apiKey),
+        headers: makeHeaders(toolKey),
         body: JSON.stringify(body),
       });
       if (!response.ok) {
@@ -652,9 +655,10 @@ export default async function (pi: ExtensionAPI) {
         max_tokens: params.max_tokens,
         stream: params.stream ?? false,
       };
+      const toolKey = await authStorage.getApiKey("ollama-cloud") ?? process.env.OLLAMA_API_KEY;
       const response = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
-        headers: makeHeaders(apiKey),
+        headers: makeHeaders(toolKey),
         body: JSON.stringify(body),
       });
       if (!response.ok) {

@@ -40,17 +40,27 @@ pi install npm:pi-ollama-api -l
 ## Setup
 
 1. **Get an API key** from [ollama.com/settings](https://ollama.com/settings)
-2. **Set the environment variable:**
-   ```bash
-   export OLLAMA_API_KEY=your-api-key-here
+2. **Start Pi** and run:
    ```
-3. **Start Pi** — the extension auto-discovers from `~/.pi/agent/extensions/` or via the installed package
+   /ollama-cloud-login
+   ```
+   Paste your API key when prompted. It is stored in Pi's `~/.pi/agent/auth.json` (same place as `/login` credentials).
+3. **Select a model** with `/model` → pick any `ollama-cloud/*` model
+
+## Authentication
+
+| Method | How | Where stored |
+|--------|-----|-------------|
+| **Interactive (recommended)** | Run `/ollama-cloud-login` in Pi | `~/.pi/agent/auth.json` |
+| **Environment variable** | `export OLLAMA_API_KEY=...` | Shell env |
+
+Pi's `AuthStorage` is used natively — API keys are checked in `auth.json` first, then the env var is used as a fallback.
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OLLAMA_API_KEY` | — | **Required.** Your Ollama Cloud API key |
+| `OLLAMA_API_KEY` | — | Fallback API key (used if auth.json has no key) |
 | `OLLAMA_CLOUD_BASE_URL` | `https://ollama.com/v1` | Override endpoint (for proxies or self-hosted) |
 | `OLLAMA_CLOUD_MODELS` | — | Comma-separated list to skip discovery and use static models |
 | `OLLAMA_CLOUD_TIMEOUT` | `30000` | Model discovery timeout in ms |
