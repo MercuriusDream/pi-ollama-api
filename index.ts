@@ -330,24 +330,93 @@ function registerProviderWithKey(pi: ExtensionAPI, baseUrl: string, models: Mode
 }
 
 // =============================================================================
-// Dynamic Model Discovery
+// Native Ollama API Model Discovery
 // =============================================================================
 
+interface OllamaShowResponse {
+  details?: {
+    parent_model?: string;
+    format?: string;
+    family?: string;
+    families?: string[] | null;
+    parameter_size?: string;
+    quantization_level?: string;
+  };
+  model_info?: Record<string, number | string>;
+  capabilities?: string[];
+  modified_at?: string;
+}
+
 async function fetchOllamaModels(baseUrl: string, apiKey?: string): Promise<ModelMeta[]> {
-  const response = await fetch(`${baseUrl}/models`, { headers: makeHeaders(apiKey) });
-  if (!response.ok) {
-    throw new Error(`Ollama Cloud API returned ${response.status}: ${await response.text()}`);
+  // Derive native API base URL from OpenAI-compatible base URL
+  const apiBaseUrl = baseUrl.replace(/\/v1\/?$/, "");
+
+  // Step 1: Get model list from native /api/tags
+  const tagsResponse = await fetch(`${apiBaseUrl}/api/tags`, { headers: makeHeaders(apiKey) });
+  if (!tagsResponse.ok) {
+    throw new Error(`Ollama Cloud API /api/tags returned ${tagsResponse.status}: ${await tagsResponse.text()}`);
   }
 
-  const payload = (await response.json()) as {
-    data?: Array<{ id: string; object?: string; created?: number; owned_by?: string }>;
+  const tagsPayload = (await tagsResponse.json()) as {
+    models?: Array<{ name: string; model: string; size: number; digest: string; details: any }>;
   };
 
-  if (!payload.data || !Array.isArray(payload.data)) {
-    throw new Error("Unexpected response format from /v1/models");
+  if (!tagsPayload.models || !Array.isArray(tagsPayload.models)) {
+    throw new Error("Unexpected response format from /api/tags");
   }
 
-  return payload.data.map((m) => resolveModelMeta(m.id));
+  // Step 2: Fetch metadata for each model in parallel
+  const metas = await Promise.all(
+    tagsPayload.models.map((m) => fetchModelMetadata(apiBaseUrl, m.name, apiKey)),
+  );
+
+  return metas.filter((m): m is ModelMeta => m !== null);
+}
+
+async function fetchModelMetadata(apiBaseUrl: string, modelId: string, apiKey?: string): Promise<ModelMeta | null> {
+  try {
+    const response = await fetch(`${apiBaseUrl}/api/show`, {
+      method: "POST",
+      headers: { ...makeHeaders(apiKey), "Content-Type": "application/json" },
+      body: JSON.stringify({ model: modelId }),
+    });
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as OllamaShowResponse;
+    const details = data.details || {};
+    const modelInfo = data.model_info || {};
+    const capabilities = data.capabilities || [];
+
+    // Extract architecture from model_info
+    const arch = String(modelInfo["general.architecture"] || details.family || "");
+    const ctxKey = arch ? `${arch}.context_length` : "";
+    const rawCtx = modelInfo[ctxKey];
+    const contextWindow = typeof rawCtx === "number" ? rawCtx : typeof rawCtx === "string" ? parseInt(rawCtx, 10) : 128000;
+
+    // Capabilities from API
+    const input: ("text" | "image")[] = ["text"];
+    if (capabilities.includes("vision")) input.push("image");
+
+    const reasoning = capabilities.includes("thinking");
+    const maxTokens = Math.min(contextWindow > 0 ? contextWindow : 128000, 128000); // Cap at 128K for safety
+
+    // Build name from known metadata or API data
+    const known = KNOWN_MODELS[modelId];
+    return {
+      id: modelId,
+      name: known?.name || modelId,
+      reasoning,
+      input,
+      contextWindow: contextWindow > 0 ? contextWindow : 128000,
+      maxTokens,
+      cost: known?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      family: details.family || known?.family,
+      size: details.parameter_size || known?.size,
+      description: known?.description || `${details.family || "unknown"} model${details.quantization_level ? `, ${details.quantization_level}` : ""}`,
+    };
+  } catch (_e) {
+    return null;
+  }
 }
 
 // =============================================================================

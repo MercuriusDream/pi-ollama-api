@@ -4,13 +4,12 @@ Ollama Cloud provider extension for [Pi](https://pi.dev) — connect your termin
 
 ## Features
 
-- **Dynamic model discovery** — Fetches live model list from `ollama.com/v1/models` on startup
-- **194 known model metadata entries** — Context windows, vision support, reasoning flags, and descriptions for all major Ollama families
+- **Native Ollama API discovery** — Queries `/api/tags` and `/api/show` for real model metadata (context windows, capabilities, parameter sizes, quantization)
+- **Actual context windows** — No hardcoded defaults. Every model reports its real context length from Ollama's API (e.g., 1M for DeepSeek V4, 262K for Kimi K2, 128K for GPT-OSS)
+- **Capability detection** — Vision, reasoning, tools detected from Ollama's `capabilities` array
 - **OpenAI-compatible API** — Uses `openai-completions` streaming (works with all Pi features)
 - **Embeddings tool** — Generate embeddings via `/v1/embeddings` for RAG and similarity search
 - **Direct chat tool** — Send one-off completions for model comparison or testing
-- **Vision support** — Correctly flags vision-capable models (Llama 3.2 Vision, Gemma 3, Qwen VL, etc.)
-- **Reasoning support** — Correctly flags reasoning models (DeepSeek R1, Qwen QWQ, etc.)
 
 ## Supported Model Families
 
