@@ -1,0 +1,39 @@
+{
+  "name": "pi-ollama-api",
+  "version": "1.0.0",
+  "description": "Ollama Cloud provider extension for Pi — connect to Ollama Cloud models via the OpenAI-compatible API",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "ollama",
+    "ollama-cloud",
+    "ai",
+    "llm",
+    "openai-compatible",
+    "chat",
+    "embeddings"
+  ],
+  "license": "MIT",
+  "author": "MercuriusDream",
+  "homepage": "https://github.com/mercuriusdream/pi-ollama-api",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mercuriusdream/pi-ollama-api.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mercuriusdream/pi-ollama-api/issues"
+  },
+  "files": [
+    "index.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
